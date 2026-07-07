@@ -1,0 +1,1 @@
+- [Saylora Architecture](saylora-architecture.md) — multi-tenant store platform; JWT needs SESSION_SECRET or throws; email is graceful-fallback; useListCities needs `as any` for enabled option
