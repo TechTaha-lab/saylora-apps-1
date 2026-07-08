@@ -60,12 +60,15 @@ export default function AdminScreen() {
       {
         text: "Sign Out",
         style: "destructive",
-        onPress: async () => {
-          try {
-            if (refreshToken) await logoutMutation.mutateAsync({ data: { refreshToken } });
-          } catch {}
-          await logout();
-          router.replace("/(auth)/login");
+        onPress: () => {
+          // Navigate first so the component stays mounted, then clean up auth state
+          router.replace("/");
+          setTimeout(async () => {
+            try {
+              if (refreshToken) await logoutMutation.mutateAsync({ data: { refreshToken } });
+            } catch {}
+            await logout();
+          }, 100);
         },
       },
     ]);

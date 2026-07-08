@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useMemo } from "react";
 import {
   View,
   Text,
@@ -7,47 +7,28 @@ import {
   Platform,
   Linking,
   ScrollView,
+  Image,
+  ActivityIndicator,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { useColors } from "@/hooks/useColors";
 import { useAuth } from "@/context/AuthContext";
+import { useListMyProducts } from "@workspace/api-client-react";
 
-const SUPPORT_NUMBER = "96171735478";
+type CartItem = { id: number; name: string; price: number; image: string | null; qty: number };
 
-function Step({
-  num,
-  icon,
-  title,
-  desc,
-  iconColor,
-  iconBg,
-  last,
-  colors,
-}: {
-  num: number;
-  icon: string;
-  title: string;
-  desc: string;
-  iconColor: string;
-  iconBg: string;
-  last?: boolean;
-  colors: any;
-}) {
-  return (
-    <View style={styles.stepRow}>
-      <View style={styles.stepLeft}>
-        <View style={[styles.stepIcon, { backgroundColor: iconBg }]}>
-          <Feather name={icon as any} size={20} color={iconColor} />
-        </View>
-        {!last && <View style={[styles.stepLine, { backgroundColor: colors.border }]} />}
-      </View>
-      <View style={styles.stepContent}>
-        <Text style={[styles.stepTitle, { color: colors.foreground }]}>{title}</Text>
-        <Text style={[styles.stepDesc, { color: colors.mutedForeground }]}>{desc}</Text>
-      </View>
-    </View>
-  );
+function getBaseUrl() {
+  if (typeof process !== "undefined" && process.env.EXPO_PUBLIC_API_URL) {
+    return process.env.EXPO_PUBLIC_API_URL.replace("/api", "");
+  }
+  return "";
+}
+
+function productImageUrl(path: string | null | undefined): string | null {
+  if (!path) return null;
+  if (path.startsWith("http")) return path;
+  return `${getBaseUrl()}${path}`;
 }
 
 export default function OrdersScreen() {
@@ -55,140 +36,404 @@ export default function OrdersScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
 
-  const topPad = Platform.OS === "web" ? 67 : insets.top;
-  const bottomPad = Platform.OS === "web" ? 34 : 0;
+  const [cart, setCart] = useState<Record<number, CartItem>>({});
 
-  async function openWhatsApp() {
-    const domain = process.env.EXPO_PUBLIC_DOMAIN;
-    const storeUrl = user?.businessSlug ? `https://${domain}/store/${user.businessSlug}` : "";
-    const message = `Hi! I'd like to place an order from ${user?.businessName ?? "your store"}. ${storeUrl}`;
-    const wa = `whatsapp://send?phone=${SUPPORT_NUMBER}&text=${encodeURIComponent(message)}`;
+  const { data: products = [], isLoading } = useListMyProducts();
+  const availableProducts = products.filter((p) => p.available);
+
+  const bottomPad = Platform.OS === "web" ? 34 : insets.bottom;
+  const topPad = Platform.OS === "web" ? 67 : 0;
+
+  const cartItems = useMemo(() => Object.values(cart).filter((i) => i.qty > 0), [cart]);
+  const cartTotal = useMemo(
+    () => cartItems.reduce((sum, i) => sum + i.price * i.qty, 0),
+    [cartItems]
+  );
+  const cartCount = useMemo(() => cartItems.reduce((s, i) => s + i.qty, 0), [cartItems]);
+
+  function setQty(productId: number, name: string, price: number, image: string | null, delta: number) {
+    setCart((prev) => {
+      const existing = prev[productId];
+      const newQty = Math.max(0, (existing?.qty ?? 0) + delta);
+      if (newQty === 0) {
+        const next = { ...prev };
+        delete next[productId];
+        return next;
+      }
+      return { ...prev, [productId]: { id: productId, name, price, image, qty: newQty } };
+    });
+  }
+
+  function clearCart() {
+    setCart({});
+  }
+
+  async function sendWhatsApp() {
+    if (cartItems.length === 0) return;
+
+    const storeName = user?.businessName ?? "Store";
+    const lines = cartItems.map(
+      (i) => `• ${i.name} x${i.qty}  —  $${(i.price * i.qty).toFixed(2)}`
+    );
+    const total = `$${cartTotal.toFixed(2)}`;
+
+    const message = [
+      `🛒 *New Order — ${storeName}*`,
+      "",
+      ...lines,
+      "",
+      `*Total: ${total}*`,
+      "",
+      "Please confirm this order!",
+    ].join("\n");
+
+    // Open WhatsApp share (no phone — store owner picks recipient)
+    const phone = user?.whatsapp?.replace(/\D/g, "") ?? "";
+    const url = phone
+      ? `whatsapp://send?phone=${phone}&text=${encodeURIComponent(message)}`
+      : `whatsapp://send?text=${encodeURIComponent(message)}`;
+
     try {
-      await Linking.openURL(wa);
+      await Linking.openURL(url);
     } catch {
-      await Linking.openURL(`https://wa.me/${SUPPORT_NUMBER}`);
+      await Linking.openURL(`https://wa.me/?text=${encodeURIComponent(message)}`);
     }
   }
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={[styles.scroll, { paddingTop: topPad + 16, paddingBottom: bottomPad + 100 }]}
-      >
-        {/* Header section */}
-        <View style={styles.topSection}>
-          <View style={[styles.iconRing, { backgroundColor: "#25D36618", borderColor: "#25D36630" }]}>
-            <Feather name="message-circle" size={38} color="#25D366" />
-          </View>
-          <Text style={[styles.title, { color: colors.foreground }]}>WhatsApp Orders</Text>
-          <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
-            Customers discover your store and place orders directly through WhatsApp — no checkout needed.
+      {/* Header */}
+      <View style={[styles.header, { paddingTop: topPad + 16, borderBottomColor: colors.border }]}>
+        <View>
+          <Text style={[styles.headerTitle, { color: colors.foreground }]}>Orders</Text>
+          <Text style={[styles.headerSub, { color: colors.mutedForeground }]}>
+            Build an order & send via WhatsApp
           </Text>
         </View>
+        {cartCount > 0 && (
+          <View style={[styles.cartBadge, { backgroundColor: colors.primary }]}>
+            <Feather name="shopping-cart" size={14} color="#fff" />
+            <Text style={styles.cartBadgeText}>{cartCount}</Text>
+          </View>
+        )}
+      </View>
 
-        {/* How it works */}
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Text style={[styles.cardTitle, { color: colors.mutedForeground }]}>HOW IT WORKS</Text>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={[
+          styles.scroll,
+          { paddingBottom: bottomPad + (cartCount > 0 ? 160 : 100) },
+        ]}
+      >
+        {/* Products */}
+        {isLoading ? (
+          <View style={styles.loadingBox}>
+            <ActivityIndicator color={colors.primary} />
+            <Text style={[styles.loadingText, { color: colors.mutedForeground }]}>
+              Loading products…
+            </Text>
+          </View>
+        ) : availableProducts.length === 0 ? (
+          <View style={[styles.emptyBox, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius + 4 }]}>
+            <Feather name="package" size={32} color={colors.mutedForeground} />
+            <Text style={[styles.emptyTitle, { color: colors.foreground }]}>No products yet</Text>
+            <Text style={[styles.emptyDesc, { color: colors.mutedForeground }]}>
+              Add products in the Products tab to start taking orders.
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.productList}>
+            <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
+              SELECT PRODUCTS
+            </Text>
+            {availableProducts.map((product) => {
+              const price = parseFloat(String(product.price ?? "0"));
+              const qty = cart[product.id]?.qty ?? 0;
+              const imgUrl = productImageUrl(product.imageUrl);
 
-          <Step
-            num={1}
-            icon="share-2"
-            title="Share your store link"
-            desc="Post it on WhatsApp, Instagram, or wherever your customers are."
-            iconColor={colors.primary}
-            iconBg={colors.secondary}
-            colors={colors}
-          />
-          <Step
-            num={2}
-            icon="smartphone"
-            title="Customer browses your store"
-            desc="They see your products with photos, descriptions and prices."
-            iconColor="#0284C7"
-            iconBg="#0284C715"
-            colors={colors}
-          />
-          <Step
-            num={3}
-            icon="message-circle"
-            title="Tap 'Order via WhatsApp'"
-            desc="Each product has a button that opens a pre-filled WhatsApp message to you."
-            iconColor="#25D366"
-            iconBg="#25D36615"
-            colors={colors}
-          />
-          <Step
-            num={4}
-            icon="check-circle"
-            title="Confirm and fulfill"
-            desc="Chat with the customer directly to confirm details and arrange delivery."
-            iconColor={colors.success}
-            iconBg={colors.success + "18"}
-            last
-            colors={colors}
-          />
-        </View>
+              return (
+                <View
+                  key={product.id}
+                  style={[
+                    styles.productCard,
+                    {
+                      backgroundColor: colors.card,
+                      borderColor: qty > 0 ? colors.primary : colors.border,
+                      borderRadius: colors.radius + 2,
+                      borderWidth: qty > 0 ? 1.5 : StyleSheet.hairlineWidth,
+                    },
+                  ]}
+                >
+                  {/* Thumbnail */}
+                  <View style={[styles.productThumb, { backgroundColor: colors.secondary, borderRadius: 10 }]}>
+                    {imgUrl ? (
+                      <Image source={{ uri: imgUrl }} style={styles.productImg} />
+                    ) : (
+                      <Feather name="shopping-bag" size={22} color={colors.mutedForeground} />
+                    )}
+                  </View>
 
-        {/* Store link card */}
-        {user?.businessSlug ? (
-          <View style={[styles.linkCard, { backgroundColor: colors.primary + "12", borderColor: colors.primary + "30", borderRadius: colors.radius + 4 }]}>
-            <Feather name="link" size={18} color={colors.primary} />
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.linkLabel, { color: colors.mutedForeground }]}>Your store link</Text>
-              <Text style={[styles.linkValue, { color: colors.primary }]} numberOfLines={1}>
-                /store/{user.businessSlug}
+                  {/* Info */}
+                  <View style={styles.productInfo}>
+                    <Text style={[styles.productName, { color: colors.foreground }]} numberOfLines={1}>
+                      {product.name}
+                    </Text>
+                    <Text style={[styles.productPrice, { color: colors.primary }]}>
+                      ${price.toFixed(2)}
+                    </Text>
+                  </View>
+
+                  {/* Qty controls */}
+                  <View style={styles.qtyRow}>
+                    <Pressable
+                      onPress={() => setQty(product.id, product.name, price, imgUrl, -1)}
+                      style={[
+                        styles.qtyBtn,
+                        {
+                          backgroundColor: qty > 0 ? colors.primary + "18" : colors.secondary,
+                          borderRadius: 20,
+                        },
+                      ]}
+                    >
+                      <Feather
+                        name="minus"
+                        size={15}
+                        color={qty > 0 ? colors.primary : colors.mutedForeground}
+                      />
+                    </Pressable>
+
+                    <Text style={[styles.qtyNum, { color: qty > 0 ? colors.primary : colors.foreground }]}>
+                      {qty}
+                    </Text>
+
+                    <Pressable
+                      onPress={() => setQty(product.id, product.name, price, imgUrl, 1)}
+                      style={[styles.qtyBtn, { backgroundColor: colors.primary, borderRadius: 20 }]}
+                    >
+                      <Feather name="plus" size={15} color="#fff" />
+                    </Pressable>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        )}
+
+        {/* Cart summary */}
+        {cartItems.length > 0 && (
+          <View style={[styles.cartSummary, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius + 4 }]}>
+            <View style={styles.cartSummaryHeader}>
+              <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>ORDER SUMMARY</Text>
+              <Pressable onPress={clearCart}>
+                <Text style={[styles.clearBtn, { color: colors.destructive }]}>Clear</Text>
+              </Pressable>
+            </View>
+
+            {cartItems.map((item) => (
+              <View key={item.id} style={[styles.cartRow, { borderTopColor: colors.border }]}>
+                <Text style={[styles.cartItemName, { color: colors.foreground }]} numberOfLines={1}>
+                  {item.name}
+                </Text>
+                <View style={styles.cartRowRight}>
+                  <Text style={[styles.cartItemQty, { color: colors.mutedForeground }]}>
+                    x{item.qty}
+                  </Text>
+                  <Text style={[styles.cartItemPrice, { color: colors.foreground }]}>
+                    ${(item.price * item.qty).toFixed(2)}
+                  </Text>
+                </View>
+              </View>
+            ))}
+
+            <View style={[styles.cartTotalRow, { borderTopColor: colors.border }]}>
+              <Text style={[styles.cartTotalLabel, { color: colors.foreground }]}>Total</Text>
+              <Text style={[styles.cartTotalValue, { color: colors.primary }]}>
+                ${cartTotal.toFixed(2)}
               </Text>
             </View>
           </View>
-        ) : null}
-
-        {/* Tips */}
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Text style={[styles.cardTitle, { color: colors.mutedForeground }]}>TIPS FOR MORE ORDERS</Text>
-          <TipItem icon="image" text="Add clear photos for every product — it boosts click-through." colors={colors} />
-          <TipItem icon="tag" text="Keep prices updated and mark sold-out items unavailable." colors={colors} />
-          <TipItem icon="zap" text="Reply fast on WhatsApp — speed builds trust." colors={colors} />
-        </View>
+        )}
       </ScrollView>
-    </View>
-  );
-}
 
-function TipItem({ icon, text, colors }: { icon: string; text: string; colors: any }) {
-  return (
-    <View style={styles.tipItem}>
-      <Feather name={icon as any} size={16} color={colors.primary} />
-      <Text style={[styles.tipText, { color: colors.foreground }]}>{text}</Text>
+      {/* Sticky bottom CTA */}
+      {cartCount > 0 ? (
+        <View
+          style={[
+            styles.ctaBar,
+            {
+              backgroundColor: colors.background,
+              borderTopColor: colors.border,
+              paddingBottom: bottomPad + 8,
+            },
+          ]}
+        >
+          <View style={styles.ctaInfo}>
+            <Text style={[styles.ctaCount, { color: colors.mutedForeground }]}>
+              {cartCount} item{cartCount !== 1 ? "s" : ""}
+            </Text>
+            <Text style={[styles.ctaTotal, { color: colors.foreground }]}>
+              ${cartTotal.toFixed(2)}
+            </Text>
+          </View>
+          <Pressable
+            onPress={sendWhatsApp}
+            style={({ pressed }) => [
+              styles.ctaBtn,
+              { backgroundColor: "#25D366", borderRadius: colors.radius, opacity: pressed ? 0.85 : 1 },
+            ]}
+          >
+            <Feather name="message-circle" size={18} color="#fff" />
+            <Text style={styles.ctaBtnText}>Send via WhatsApp</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <View
+          style={[
+            styles.ctaHint,
+            {
+              backgroundColor: colors.background,
+              borderTopColor: colors.border,
+              paddingBottom: bottomPad + 8,
+            },
+          ]}
+        >
+          <Feather name="info" size={14} color={colors.mutedForeground} />
+          <Text style={[styles.ctaHintText, { color: colors.mutedForeground }]}>
+            Tap + on any product to add it to your order
+          </Text>
+        </View>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  scroll: { paddingHorizontal: 20, gap: 16 },
 
-  topSection: { alignItems: "center", gap: 12, paddingVertical: 8 },
-  iconRing: { width: 84, height: 84, borderRadius: 42, alignItems: "center", justifyContent: "center", borderWidth: 1 },
-  title: { fontSize: 26, fontFamily: "Inter_700Bold", letterSpacing: -0.5, textAlign: "center" },
-  subtitle: { fontSize: 15, fontFamily: "Inter_400Regular", textAlign: "center", lineHeight: 22 },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 20,
+    paddingBottom: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  headerTitle: { fontSize: 24, fontFamily: "Inter_700Bold", letterSpacing: -0.4 },
+  headerSub: { fontSize: 13, fontFamily: "Inter_400Regular", marginTop: 2 },
+  cartBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  cartBadgeText: { fontSize: 14, fontFamily: "Inter_700Bold", color: "#fff" },
 
-  card: { borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, overflow: "hidden" },
-  cardTitle: { fontSize: 11, fontFamily: "Inter_600SemiBold", letterSpacing: 0.8, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10 },
+  scroll: { paddingHorizontal: 16, paddingTop: 16, gap: 16 },
 
-  stepRow: { flexDirection: "row", paddingHorizontal: 16, gap: 14 },
-  stepLeft: { alignItems: "center", width: 44 },
-  stepIcon: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
-  stepLine: { width: 2, flex: 1, minHeight: 16, marginVertical: 4 },
-  stepContent: { flex: 1, paddingBottom: 16 },
-  stepTitle: { fontSize: 14, fontFamily: "Inter_600SemiBold", marginBottom: 2, marginTop: 10 },
-  stepDesc: { fontSize: 13, fontFamily: "Inter_400Regular", lineHeight: 18 },
+  loadingBox: { alignItems: "center", gap: 10, paddingVertical: 48 },
+  loadingText: { fontSize: 14, fontFamily: "Inter_400Regular" },
 
-  linkCard: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderWidth: 1 },
-  linkLabel: { fontSize: 11, fontFamily: "Inter_400Regular", marginBottom: 2 },
-  linkValue: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
+  emptyBox: {
+    alignItems: "center",
+    gap: 10,
+    padding: 36,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  emptyTitle: { fontSize: 17, fontFamily: "Inter_700Bold" },
+  emptyDesc: { fontSize: 13, fontFamily: "Inter_400Regular", textAlign: "center", lineHeight: 19 },
 
-  tipItem: { flexDirection: "row", alignItems: "flex-start", gap: 12, paddingHorizontal: 16, paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth },
-  tipText: { flex: 1, fontSize: 14, fontFamily: "Inter_400Regular", lineHeight: 20 },
+  sectionLabel: { fontSize: 11, fontFamily: "Inter_600SemiBold", letterSpacing: 0.8 },
+
+  productList: { gap: 10 },
+  productCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    padding: 12,
+  },
+  productThumb: { width: 52, height: 52, alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  productImg: { width: 52, height: 52 },
+  productInfo: { flex: 1, gap: 3 },
+  productName: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
+  productPrice: { fontSize: 13, fontFamily: "Inter_700Bold" },
+
+  qtyRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  qtyBtn: { width: 34, height: 34, alignItems: "center", justifyContent: "center" },
+  qtyNum: { fontSize: 16, fontFamily: "Inter_700Bold", minWidth: 22, textAlign: "center" },
+
+  cartSummary: { borderWidth: StyleSheet.hairlineWidth, overflow: "hidden" },
+  cartSummaryHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 10,
+  },
+  clearBtn: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
+  cartRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 11,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  cartItemName: { flex: 1, fontSize: 14, fontFamily: "Inter_400Regular" },
+  cartRowRight: { flexDirection: "row", alignItems: "center", gap: 10 },
+  cartItemQty: { fontSize: 13, fontFamily: "Inter_400Regular" },
+  cartItemPrice: { fontSize: 14, fontFamily: "Inter_700Bold", minWidth: 60, textAlign: "right" },
+  cartTotalRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  cartTotalLabel: { fontSize: 15, fontFamily: "Inter_700Bold" },
+  cartTotalValue: { fontSize: 20, fontFamily: "Inter_700Bold" },
+
+  // Bottom CTA
+  ctaBar: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  ctaInfo: { flex: 1, gap: 1 },
+  ctaCount: { fontSize: 12, fontFamily: "Inter_400Regular" },
+  ctaTotal: { fontSize: 18, fontFamily: "Inter_700Bold" },
+  ctaBtn: {
+    flex: 2,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 14,
+  },
+  ctaBtnText: { fontSize: 15, fontFamily: "Inter_600SemiBold", color: "#fff" },
+
+  ctaHint: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  ctaHintText: { fontSize: 13, fontFamily: "Inter_400Regular" },
 });
