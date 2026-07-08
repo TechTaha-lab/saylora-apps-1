@@ -46,10 +46,18 @@ router.post("/auth/register", async (req, res): Promise<void> => {
     countryId,
     cityId,
     acceptTerms,
+    accountType = "business", // "business" | "user"
   } = req.body;
 
-  if (!email || !password || !name || !businessName || !acceptTerms) {
+  // Base required fields for all account types
+  if (!email || !password || !name || !acceptTerms) {
     res.status(400).json({ error: "Missing required fields" });
+    return;
+  }
+
+  // Business accounts additionally require a business name
+  if (accountType !== "user" && !businessName) {
+    res.status(400).json({ error: "Business name is required" });
     return;
   }
 
@@ -82,26 +90,31 @@ router.post("/auth/register", async (req, res): Promise<void> => {
     })
     .returning();
 
-  const slug = makeUniqueSlug(businessName);
-  const trialStartsAt = new Date();
-  const trialEndsAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
-  const [business] = await db
-    .insert(businessesTable)
-    .values({
-      userId: user.id,
-      name: businessName.trim(),
-      slug,
-      categoryId: categoryId ? Number(categoryId) : null,
-      countryId: countryId ? Number(countryId) : null,
-      cityId: cityId ? Number(cityId) : null,
-      whatsapp: whatsapp?.trim() ?? null,
-      subscriptionType: "trial",
-      trialStartsAt,
-      trialEndsAt,
-      subscriptionExpiresAt: trialEndsAt,
-      isActive: true,
-    })
-    .returning();
+  // Only create a business for business accounts
+  let business: typeof businessesTable.$inferSelect | null = null;
+  if (accountType !== "user" && businessName) {
+    const slug = makeUniqueSlug(businessName);
+    const trialStartsAt = new Date();
+    const trialEndsAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+    const [biz] = await db
+      .insert(businessesTable)
+      .values({
+        userId: user.id,
+        name: businessName.trim(),
+        slug,
+        categoryId: categoryId ? Number(categoryId) : null,
+        countryId: countryId ? Number(countryId) : null,
+        cityId: cityId ? Number(cityId) : null,
+        whatsapp: whatsapp?.trim() ?? null,
+        subscriptionType: "trial",
+        trialStartsAt,
+        trialEndsAt,
+        subscriptionExpiresAt: trialEndsAt,
+        isActive: true,
+      })
+      .returning();
+    business = biz;
+  }
 
   const accessToken = generateAccessToken(user.id, user.email);
   const refreshToken = generateRefreshToken();
@@ -138,13 +151,13 @@ router.post("/auth/register", async (req, res): Promise<void> => {
       language: user.language,
       emailVerified: user.emailVerified,
       isAdmin: user.isAdmin,
-      businessId: business.id,
-      businessName: business.name,
-      businessSlug: business.slug,
-      businessSubscriptionType: business.subscriptionType,
-      businessIsActive: business.isActive,
-      businessTrialEndsAt: business.trialEndsAt?.toISOString() ?? null,
-      businessSubscriptionExpiresAt: business.subscriptionExpiresAt?.toISOString() ?? null,
+      businessId: business?.id ?? null,
+      businessName: business?.name ?? null,
+      businessSlug: business?.slug ?? null,
+      businessSubscriptionType: business?.subscriptionType ?? null,
+      businessIsActive: business?.isActive ?? null,
+      businessTrialEndsAt: business?.trialEndsAt?.toISOString() ?? null,
+      businessSubscriptionExpiresAt: business?.subscriptionExpiresAt?.toISOString() ?? null,
     },
     accessToken,
     refreshToken,

@@ -160,10 +160,17 @@ export default function HomeScreen() {
 
         {/* Email verification banner */}
         {user?.emailVerified === false ? (
-          <View style={[styles.verifyBanner, { backgroundColor: "#FEF3C7", borderColor: "#F59E0B30", borderRadius: colors.radius }]}>
+          <Pressable
+            style={[styles.verifyBanner, { backgroundColor: "#FEF3C7", borderColor: "#F59E0B30", borderRadius: colors.radius }]}
+            onPress={() => router.push({ pathname: "/(auth)/verify-email", params: { email: user.email } })}
+          >
             <Feather name="mail" size={16} color="#D97706" />
             <Text style={styles.verifyText}>Please verify your email address.</Text>
-          </View>
+            <View style={styles.verifyBtn}>
+              <Text style={styles.verifyBtnText}>Verify Now</Text>
+              <Feather name="chevron-right" size={13} color="#D97706" />
+            </View>
+          </Pressable>
         ) : null}
 
         {/* Quick actions */}
@@ -310,6 +317,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   verifyText: { fontSize: 13, fontFamily: "Inter_500Medium", color: "#D97706", flex: 1 },
+  verifyBtn: { flexDirection: "row", alignItems: "center", gap: 2 },
+  verifyBtnText: { fontSize: 12, fontFamily: "Inter_600SemiBold", color: "#D97706" },
 
   sectionLabel: { fontSize: 11, fontFamily: "Inter_600SemiBold", letterSpacing: 0.8, marginBottom: -6 },
 

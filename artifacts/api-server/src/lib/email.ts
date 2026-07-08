@@ -1,20 +1,27 @@
 import nodemailer from "nodemailer";
 
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST ?? "smtp.gmail.com",
-  port: Number(process.env.SMTP_PORT ?? 587),
-  secure: process.env.SMTP_SECURE === "true",
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-});
+// Create transporter lazily on each call so env vars are read at send-time,
+// not at module-load time (important for Replit Secrets picked up after start).
+function createTransporter() {
+  return nodemailer.createTransport({
+    host: process.env.SMTP_HOST ?? "smtp.gmail.com",
+    port: Number(process.env.SMTP_PORT ?? 587),
+    secure: process.env.SMTP_SECURE === "true",
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+  });
+}
 
-const FROM = `"${process.env.SMTP_FROM_NAME ?? "Saylora"}" <${process.env.SMTP_FROM_EMAIL ?? "noreply@saylora.store"}>`;
+function getFrom() {
+  return `"${process.env.SMTP_FROM_NAME ?? "Saylora"}" <${process.env.SMTP_FROM_EMAIL ?? "noreply@saylora.store"}>`;
+}
 
 export async function sendVerificationEmail(email: string, otp: string): Promise<void> {
+  const transporter = createTransporter();
   await transporter.sendMail({
-    from: FROM,
+    from: getFrom(),
     to: email,
     replyTo: process.env.AUTH_REPLY_TO_EMAIL,
     subject: "Verify your Saylora email",
@@ -37,8 +44,9 @@ export async function sendVerificationEmail(email: string, otp: string): Promise
 }
 
 export async function sendPasswordResetEmail(email: string, otp: string): Promise<void> {
+  const transporter = createTransporter();
   await transporter.sendMail({
-    from: FROM,
+    from: getFrom(),
     to: email,
     replyTo: process.env.AUTH_REPLY_TO_EMAIL,
     subject: "Reset your Saylora password",
