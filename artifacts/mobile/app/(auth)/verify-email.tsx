@@ -6,12 +6,14 @@ import { useColors } from "@/hooks/useColors";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { useVerifyEmail, useResendVerification } from "@workspace/api-client-react";
+import { useAuth } from "@/context/AuthContext";
 import { Feather } from "@expo/vector-icons";
 
 export default function VerifyEmailScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { email } = useLocalSearchParams<{ email: string }>();
+  const { user, updateUser } = useAuth();
   const [otp, setOtp] = useState("");
   const [error, setError] = useState("");
   const verifyMutation = useVerifyEmail();
@@ -25,6 +27,10 @@ export default function VerifyEmailScreen() {
     setError("");
     try {
       await verifyMutation.mutateAsync({ data: { email: email ?? "", otp: otp.trim() } });
+      // Update user in context to reflect verified status
+      if (user) {
+        await updateUser({ ...user, emailVerified: true });
+      }
       Alert.alert("Email Verified!", "Your email has been verified successfully.", [
         { text: "Continue", onPress: () => router.replace("/(home)/") },
       ]);

@@ -9,6 +9,7 @@ import {
   ScrollView,
   Image,
   ActivityIndicator,
+  TextInput,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
@@ -37,9 +38,19 @@ export default function OrdersScreen() {
   const { user } = useAuth();
 
   const [cart, setCart] = useState<Record<number, CartItem>>({});
+  const [searchQuery, setSearchQuery] = useState("");
 
   const { data: products = [], isLoading } = useListMyProducts();
   const availableProducts = products.filter((p) => p.available);
+  
+  // Filter products by search query
+  const filteredProducts = useMemo(
+    () => availableProducts.filter((p) => 
+      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (p.description && p.description.toLowerCase().includes(searchQuery.toLowerCase()))
+    ),
+    [availableProducts, searchQuery]
+  );
 
   const bottomPad = Platform.OS === "web" ? 34 : insets.bottom;
   const topPad = Platform.OS === "web" ? 67 : 0;
@@ -143,10 +154,36 @@ export default function OrdersScreen() {
           </View>
         ) : (
           <View style={styles.productList}>
+            {/* Search input */}
+            <View style={[styles.searchBox, { borderColor: colors.border, backgroundColor: colors.card }]}>
+              <Feather name="search" size={18} color={colors.mutedForeground} />
+              <TextInput
+                placeholder="Search products…"
+                placeholderTextColor={colors.mutedForeground}
+                style={[styles.searchInput, { color: colors.foreground }]}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+              />
+              {searchQuery.length > 0 && (
+                <Pressable onPress={() => setSearchQuery("")}>
+                  <Feather name="x" size={18} color={colors.mutedForeground} />
+                </Pressable>
+              )}
+            </View>
+
             <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
-              SELECT PRODUCTS
+              SELECT PRODUCTS {searchQuery && `(${filteredProducts.length} found)`}
             </Text>
-            {availableProducts.map((product) => {
+            {filteredProducts.length === 0 ? (
+              <View style={[styles.emptyBox, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius + 4 }]}>
+                <Feather name="search" size={32} color={colors.mutedForeground} />
+                <Text style={[styles.emptyTitle, { color: colors.foreground }]}>No products found</Text>
+                <Text style={[styles.emptyDesc, { color: colors.mutedForeground }]}>
+                  Try a different search term
+                </Text>
+              </View>
+            ) : (
+              filteredProducts.map((product) => {
               const price = parseFloat(String(product.price ?? "0"));
               const qty = cart[product.id]?.qty ?? 0;
               const imgUrl = productImageUrl(product.imageUrl);
@@ -215,7 +252,7 @@ export default function OrdersScreen() {
                   </View>
                 </View>
               );
-            })}
+            }))}
           </View>
         )}
 
@@ -235,9 +272,23 @@ export default function OrdersScreen() {
                   {item.name}
                 </Text>
                 <View style={styles.cartRowRight}>
-                  <Text style={[styles.cartItemQty, { color: colors.mutedForeground }]}>
-                    x{item.qty}
-                  </Text>
+                  <View style={styles.cartQtyControls}>
+                    <Pressable
+                      onPress={() => setQty(item.id, item.name, item.price, item.image, -1)}
+                      style={[styles.cartQtyBtn, { backgroundColor: colors.primary + "18", borderRadius: 16 }]}
+                    >
+                      <Feather name="minus" size={13} color={colors.primary} />
+                    </Pressable>
+                    <Text style={[styles.cartQtyNum, { color: colors.foreground }]}>
+                      {item.qty}
+                    </Text>
+                    <Pressable
+                      onPress={() => setQty(item.id, item.name, item.price, item.image, 1)}
+                      style={[styles.cartQtyBtn, { backgroundColor: colors.primary, borderRadius: 16 }]}
+                    >
+                      <Feather name="plus" size={13} color="#fff" />
+                    </Pressable>
+                  </View>
                   <Text style={[styles.cartItemPrice, { color: colors.foreground }]}>
                     ${(item.price * item.qty).toFixed(2)}
                   </Text>
@@ -346,6 +397,18 @@ const styles = StyleSheet.create({
 
   sectionLabel: { fontSize: 11, fontFamily: "Inter_600SemiBold", letterSpacing: 0.8 },
 
+  searchBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    marginBottom: 4,
+  },
+  searchInput: { flex: 1, fontSize: 14, fontFamily: "Inter_400Regular" },
+
   productList: { gap: 10 },
   productCard: {
     flexDirection: "row",
@@ -384,6 +447,9 @@ const styles = StyleSheet.create({
   cartItemName: { flex: 1, fontSize: 14, fontFamily: "Inter_400Regular" },
   cartRowRight: { flexDirection: "row", alignItems: "center", gap: 10 },
   cartItemQty: { fontSize: 13, fontFamily: "Inter_400Regular" },
+  cartQtyControls: { flexDirection: "row", alignItems: "center", gap: 6 },
+  cartQtyBtn: { width: 28, height: 28, alignItems: "center", justifyContent: "center" },
+  cartQtyNum: { fontSize: 13, fontFamily: "Inter_600SemiBold", minWidth: 18, textAlign: "center" },
   cartItemPrice: { fontSize: 14, fontFamily: "Inter_700Bold", minWidth: 60, textAlign: "right" },
   cartTotalRow: {
     flexDirection: "row",

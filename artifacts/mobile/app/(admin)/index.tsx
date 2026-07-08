@@ -62,7 +62,7 @@ export default function AdminScreen() {
         style: "destructive",
         onPress: () => {
           // Navigate first so the component stays mounted, then clean up auth state
-          router.replace("/");
+          router.replace("/(auth)/login");
           setTimeout(async () => {
             try {
               if (refreshToken) await logoutMutation.mutateAsync({ data: { refreshToken } });
